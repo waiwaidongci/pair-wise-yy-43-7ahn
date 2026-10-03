@@ -98,6 +98,15 @@ def make_handler(service: Service, static_dir: str):
                     actor, role = self._identity()
                     del actor
                     self._json(200, {"events": service.audit(role)})
+                elif path == "/api/sync/pending":
+                    actor, role = self._identity()
+                    del actor
+                    self._json(200, {"records": service.list_pending_sync(role)})
+                elif path.startswith("/api/sync/batches/"):
+                    batch_key = path.split("/")[4]
+                    actor, role = self._identity()
+                    del actor
+                    self._json(200, service.get_sync_batch(batch_key, role))
                 else:
                     self._json(404, {"error": "not_found"})
             except Exception as exc:
@@ -119,6 +128,13 @@ def make_handler(service: Service, static_dir: str):
                     expected = body.get("expected_version")
                     self._json(200, service.transition(
                         item_id, target, expected, actor, role))
+                elif path == "/api/sync":
+                    self._json(200, service.sync_batch(body, actor, role))
+                elif path.startswith("/api/sync/batches/") and path.endswith("/confirm"):
+                    batch_key = path.split("/")[4]
+                    self._json(200, service.decide_sync(
+                        batch_key, body.get("client_ref"), body.get("decision"),
+                        actor, role, body.get("reason")))
                 else:
                     self._json(404, {"error": "not_found"})
             except Exception as exc:

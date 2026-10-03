@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from .domain import ensure_role, normalize_severity, require_number, require_text
+from .domain import (ValidationError, ensure_role, normalize_severity,
+                     require_number, require_text)
 from .repository import Repository
-from .rules import (AUDIT_ROLES, CREATE_ROLES, ENTITY, RECORD_ROLES, TITLE,
+from .rules import (AUDIT_ROLES, CREATE_ROLES, EVIDENCE_REQUIRED, ENTITY,
+                    RECORD_ROLES, STAGE_ORDER, SUSPEND_STAGES, TITLE,
                     VIEW_ROLES, completion_blockers, escalation_required,
                     priority_score, response_deadline_hours, role_for_transition,
                     validate_transition)
@@ -90,6 +92,45 @@ class Service:
     def audit(self, role: str, item_id: Optional[int] = None) -> list:
         ensure_role(role, AUDIT_ROLES)
         return self.repository.list_audit(item_id)
+
+    # ------------------------------------------------------------------
+    # 离线同步
+    # ------------------------------------------------------------------
+    def sync_batch(self, payload: Dict[str, Any], actor: str, role: str) -> Dict[str, Any]:
+        actor = require_text(actor, "actor", 100)
+        batch_key = require_text(payload.get("batch_key"), "batch_key", 100)
+        records = payload.get("records")
+        if not isinstance(records, list) or not records:
+            raise ValidationError("records必须是非空数组")
+        return self.repository.apply_sync(
+            batch_key, actor, role, records,
+            allowed_roles=RECORD_ROLES,
+            evidence_required=EVIDENCE_REQUIRED,
+            suspend_stages=SUSPEND_STAGES,
+        )
+
+    def get_sync_batch(self, batch_key: str, role: str) -> Dict[str, Any]:
+        self._view(role)
+        return self.repository.get_sync_batch(batch_key)
+
+    def list_pending_sync(self, role: str) -> list:
+        ensure_role(role, set(["response_commander", "operations"]))
+        return self.repository.list_pending_sync_records()
+
+    def decide_sync(self, batch_key: str, client_ref: Optional[str], decision: str,
+                    actor: str, role: str, reason: Optional[str] = None) -> Dict[str, Any]:
+        ensure_role(role, set(["response_commander"]))
+        actor = require_text(actor, "actor", 100)
+        if decision not in ("confirm", "reject"):
+            raise ValidationError("decision必须是confirm或reject")
+        if client_ref is not None:
+            require_text(client_ref, "client_ref", 100)
+            return self.repository.decide_sync_record(client_ref, decision, actor, role, reason)
+        results = []
+        for row in self.repository.list_pending_for_batch(batch_key):
+            results.append(self.repository.decide_sync_record(
+                row["client_ref"], decision, actor, role, reason))
+        return {"batch_key": batch_key, "decision": decision, "results": results}
 
     @staticmethod
     def enrich(item: Dict[str, Any]) -> Dict[str, Any]:
