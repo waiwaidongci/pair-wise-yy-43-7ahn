@@ -98,6 +98,13 @@ def make_handler(service: Service, static_dir: str):
                     actor, role = self._identity()
                     del actor
                     self._json(200, {"events": service.audit(role)})
+                elif path == "/api/sync/pending":
+                    actor, role = self._identity()
+                    del actor
+                    query = parse_qs(urlparse(self.path).query)
+                    raw_item = query.get("item_id", [None])[0]
+                    item_id = int(raw_item) if raw_item is not None else None
+                    self._json(200, {"pending": service.list_pending(role, item_id)})
                 else:
                     self._json(404, {"error": "not_found"})
             except Exception as exc:
@@ -110,6 +117,15 @@ def make_handler(service: Service, static_dir: str):
                 body = self._body()
                 if path == "/api/items":
                     self._json(201, service.create_item(body, actor, role))
+                elif path == "/api/sync/batch":
+                    self._json(200, service.sync_batch(body, actor, role))
+                elif path.startswith("/api/sync/pending/") and path.endswith("/confirm"):
+                    pending_id = int(path.split("/")[4])
+                    self._json(200, service.confirm_pending(pending_id, actor, role))
+                elif path.startswith("/api/sync/pending/") and path.endswith("/reject"):
+                    pending_id = int(path.split("/")[4])
+                    self._json(200, service.reject_pending(
+                        pending_id, actor, role, body.get("reason")))
                 elif path.startswith("/api/items/") and path.endswith("/records"):
                     item_id = int(path.split("/")[3])
                     self._json(201, service.add_record(item_id, body, actor, role))

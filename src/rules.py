@@ -20,3 +20,11 @@ def validate_transition(current,target):
     if not can_transition(current,target): raise ConflictError(f"不能从{current}转换到{target}")
 def completion_blockers(target,open_records): return ["仍有未关闭事项"] if target in TERMINAL_STATES and open_records>0 else []
 def role_for_transition(target): return set(TRANSITION_ROLES.get(target,[]))
+SYNC_ROLES=set(['response_commander', 'operations']); SYNC_BATCH_LIMIT=500; HELD_TARGETS=('monitoring', 'closed')
+def sync_decision(current,target):
+    """现场同步目标阶段的处置方式：applied/evidence_only/pending"""
+    if target not in STATES: raise ValidationError("未知状态")
+    if STATES.index(target)<=STATES.index(current): return "evidence_only"
+    if target in HELD_TARGETS: return "pending"
+    if can_transition(current,target): return "applied"
+    return "evidence_only"
